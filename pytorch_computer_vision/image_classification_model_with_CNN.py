@@ -1,220 +1,135 @@
 
+"""Train a convolutional FashionMNIST model in PyTorch."""
+
+import time
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-from torch.utils.data import DataLoader
-from timeit import default_timer as timer
-from tqdm import tqdm
 
-BATCH_SIZE = 32 # normally people choose powers of 2
+RANDOM_SEED = 42
+BATCH_SIZE = 32
+EPOCHS = 3
+DATA_DIR = "./data/FashionMNIST"
 
-#the object train_data will have data(tensor), targets(tensor) and classes(list) stored as attributes
-train_data = datasets.FashionMNIST(root = "/home/ajamshid/sgoinfre/FashionMNIST",
-                                   train=True,
-                                   download=True,
-                                   transform=ToTensor(),
-                                   target_transform=None
-)
-test_data = datasets.FashionMNIST(root="/home/ajamshid/sgoinfre/FashionMNIST",
-                                  train=False,
-                                  download=True,
-                                  transform=ToTensor())
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-train_dataloader = DataLoader(train_data,
-                              batch_size = BATCH_SIZE,
-                              shuffle = True)
-
-test_dataloader = DataLoader(test_data,
-                             batch_size = BATCH_SIZE,
-                             shuffle = True)
-
-
-class  FashionMNISTModelV1(nn.Module):
-    def __init__(self, input_shape: int, output_shape:int, hidden_units:int):
-        super().__init__()
-        self.block_0 = nn.Sequential(nn.Conv2d(input_shape, #4d shape (N, C, H, W) batch size, color channels, height, width
-                                hidden_units,
-                                kernel_size=3,
-                                stride= 1,
-                                padding= 1),
-                      nn.ReLU(),
-                      nn.Conv2d(hidden_units,
-                                hidden_units,
-                                kernel_size= 3,
-                                stride= 1,
-                                padding= 1),
-                      nn.ReLU(),
-                      nn.MaxPool2d(kernel_size= 3,
-                                   stride= 2)
-                      )
-        self.block_1 = nn.Sequential(nn.Conv2d(hidden_units,
-                                               out_channels=hidden_units,
-                                               kernel_size=3,
-                                               stride=1,
-                                               padding=1),
-                                     nn.ReLU(),
-                                     nn.Conv2d(in_channels=hidden_units,
-                                               out_channels=hidden_units,
-                                               kernel_size= 3,
-                                               stride=1,
-                                               padding=1),
-                                     nn.ReLU(),
-                                     nn.MaxPool2d(kernel_size=3,
-                                                  stride=2))
-        self.classifier = nn.Sequential(nn.Flatten(),
-                                        nn.Linear(in_features= hidden_units*6*6, out_features=output_shape))
-    def forward(self, x: torch.tensor):
-        x = self.block_0(x)
-        x = self.block_1(x)
-        x = self.classifier(x)
-        return x
-        
-torch.manual_seed(42)
-model_0 = FashionMNISTModelV1(input_shape=1, 
-    hidden_units=10, 
-    output_shape=len(train_data.classes))
-
-loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(params=model_0.parameters(), 
-                             lr=0.1)
-
-
-def accuracy_fn(y_true, y_pred):
-    """Calculates accuracy of a model.
-    
-    Args:
-        y_true (int): true value
-        y_pred (int) : predicted value
-        
-    returns:
-        int: percentage of accuracy
-    """
-    accurate = torch.eq(y_pred, y_true).sum().item()
-    return (accurate / len(y_pred) * 100)
-
-def print_train_time(start, end):
-    """Prints difference between start and end time.
-    
-    Args:
-        start (fload): start time of the computation (in timeit formate)
-        end (float : end time of the computation)
-        
-    returns:
-        float: time beween start and end in seconds
-    """
-    total_time =  end - start
-    print(f"Train time : {total_time:.3f} seconds")
-    return total_time
-
-def eval_model(model: torch.nn.Module, 
-               data_loader: torch.utils.data.DataLoader, 
-               loss_fn: torch.nn.Module, 
-               accuracy_fn, ):
-    """Evaluates a given model on a given dataset.
+def load_data(batch_size: int):
+    """Load FashionMNIST dataset with train/test split.
 
     Args:
-        model (torch.nn.Module): A PyTorch model capable of making predictions on data_loader.
-        data_loader (torch.utils.data.DataLoader): The target dataset to predict on.
-        loss_fn (torch.nn.Module): The loss function of model.
-        accuracy_fn: An accuracy function to compare the models predictions to the truth labels.
-        device (str, optional): Target device to compute on. Defaults to device.
+        batch_size: Number of samples per batch
 
     Returns:
-        (dict): Results of model making predictions on data_loader.
+        Tuple of (train_loader, test_loader)
     """
-    loss, acc = 0, 0
-    model.eval()
-    with torch.inference_mode():
-        for X, y in data_loader:
-            # Send data to the target device
-            y_pred = model(X)
-            loss += loss_fn(y_pred, y)
-            acc += accuracy_fn(y_true=y, y_pred=y_pred.argmax(dim=1))
-        
-        # Scale loss and acc
-        loss /= len(data_loader)
-        acc /= len(data_loader)
-    return {"model_name": model.__class__.__name__, # only works when model was created with a class
-            "model_loss": loss.item(),
-            "model_acc": acc}
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
 
-def train_step(data_loader:DataLoader, model:nn.Module, loss_fn:nn.Module, optimizer:torch.optim.Optimizer, accuracy_fn):
-    """Trains the given model and prints out the train loss and accuracy.
-    
-    Args:
-        data_loader (DataLoader) : batch generator of images
-        model (nn.Module) : the ML model to train.
-        loss_fn (nn.Module) : loss funtion for calculating loss of the model
-        optimizer(torch.optim.Optimizer) : optemizer function to optimize the model
-        accuracy_fn : accuracy function
-    """
-    train_loss, train_acc = 0, 0
+    transform = ToTensor()
+    train_data = datasets.FashionMNIST(root=DATA_DIR, train=True, download=True, transform=transform)
+    test_data = datasets.FashionMNIST(root=DATA_DIR, train=False, download=True, transform=transform)
+    return (
+        DataLoader(train_data, batch_size=batch_size, shuffle=True),
+        DataLoader(test_data, batch_size=batch_size, shuffle=False),
+    )
+
+class FashionCNN(nn.Module):
+    """A convolutional neural network for FashionMNIST image classification."""
+
+    def __init__(self, input_channels: int, hidden_channels: int, num_classes: int):
+        super().__init__()
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(hidden_channels * 7 * 7, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.feature_extractor(x)
+        return self.classifier(x)
+
+def accuracy_fn(y_true: torch.Tensor, y_pred: torch.Tensor) -> float:
+    return torch.eq(y_true, y_pred).sum().item() / len(y_true) * 100.0
+
+def train_step(
+    model: nn.Module,
+    loader: DataLoader,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> tuple[float, float]:
     model.train()
-    for X, y in data_loader:
-        y_pred = model(X)
+    total_loss = 0.0
+    total_acc = 0.0
+    for X, y in loader:
+        X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
-        loss = loss_fn(y_pred, y)
-        train_loss += loss
-        train_acc += accuracy_fn(y_true=y,
-                                 y_pred=y_pred.argmax(dim=1))
+        outputs = model(X)
+        loss = loss_fn(outputs, y)
         loss.backward()
         optimizer.step()
-    train_loss /= len(data_loader)
-    train_acc /= len(data_loader)
-    print(f"Train loss: {train_loss:.5f} | Train accuracy: {train_acc:.2f}%")
+        total_loss += loss.item()
+        total_acc += accuracy_fn(y, outputs.argmax(dim=1))
+    return total_loss / len(loader), total_acc / len(loader)
 
-def test_step(data_loader:DataLoader, model:nn.Module, loss_fn:nn.Module, accuracy_fn):
-    """Tests the given model and prints out the test loss and accuracy.
-    
-    Args:
-        data_loader (DataLoader) : batch generator of images
-        model (nn.Module) : the ML model to train.
-        loss_fn (nn.Module) : loss funtion for calculating loss of the model
-        accuracy_fn : accuracy function
-    """
+def test_step(model: nn.Module, loader: DataLoader, loss_fn: nn.Module) -> tuple[float, float]:
+    model.eval()
+    total_loss = 0.0
+    total_acc = 0.0
     with torch.inference_mode():
-        test_loss, test_acc = 0, 0
-        for X, y in data_loader:
-            y_pred = model(X)
-            loss = loss_fn(y_pred, y)
-            test_loss += loss
-            test_acc += accuracy_fn(y_true = y,
-                                    y_pred = y_pred.argmax(dim=1))
-        test_loss /= len(data_loader)
-        test_acc /= len(data_loader)
-        print(f"Test loss: {test_loss:.5f} | Test accuracy: {test_acc:.2f}%")
-        
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+            outputs = model(X)
+            loss = loss_fn(outputs, y)
+            total_loss += loss.item()
+            total_acc += accuracy_fn(y, outputs.argmax(dim=1))
+    return total_loss / len(loader), total_acc / len(loader)
 
-torch.manual_seed(42)
-train_time_start_model_0 = timer()
+def main() -> None:
+    """Main training and evaluation function for FashionMNIST CNN classification."""
+    torch.manual_seed(RANDOM_SEED)
 
-epochs = 3
-for epoch in range(epochs):
-    print(f"Epoch: {epoch}\n---------")
-    train_step(data_loader=train_dataloader, 
-        model=model_0, 
-        loss_fn=loss_fn,
-        optimizer=optimizer,
-        accuracy_fn=accuracy_fn
-    )
-    test_step(data_loader=test_dataloader,
-        model=model_0,
-        loss_fn=loss_fn,
-        accuracy_fn=accuracy_fn
-    )
+    # Validate configuration
+    if EPOCHS <= 0:
+        raise ValueError("EPOCHS must be positive")
+    if BATCH_SIZE <= 0:
+        raise ValueError("BATCH_SIZE must be positive")
 
-train_time_end_model_0 = timer()
-total_train_time_model_0 = print_train_time(start=train_time_start_model_0,
-                                           end=train_time_end_model_0)
+    train_loader, test_loader = load_data(BATCH_SIZE)
+    model = FashionCNN(input_channels=1, hidden_channels=16, num_classes=10).to(device)
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
+    print(f"Using device: {device}")
+    print(f"Model: {model.__class__.__name__}")
+    print(f"Training samples: {len(train_loader.dataset)}")
+    print(f"Test samples: {len(test_loader.dataset)}")
+    print(f"Batch size: {BATCH_SIZE}")
+    print(f"Epochs: {EPOCHS}")
 
-# Get model_2 results 
-model_2_results = eval_model(
-    model=model_0,
-    data_loader=test_dataloader,
-    loss_fn=loss_fn,
-    accuracy_fn=accuracy_fn
-)
-print(model_2_results)
+    start_time = time.perf_counter()
+    print("\nStarting training...")
 
+    for epoch in range(1, EPOCHS + 1):
+        train_loss, train_acc = train_step(model, train_loader, loss_fn, optimizer)
+        test_loss, test_acc = test_step(model, test_loader, loss_fn)
+        print(
+            f"Epoch {epoch}/{EPOCHS} | "
+            f"Train loss: {train_loss:.5f}, Train acc: {train_acc:.2f}% | "
+            f"Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%"
+        )
+    duration = time.perf_counter() - start_time
+    print(f"\nTraining completed in {duration:.2f} seconds")
+
+if __name__ == "__main__":
+    main()

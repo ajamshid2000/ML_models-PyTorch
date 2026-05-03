@@ -1,128 +1,129 @@
 
-from sklearn.datasets import make_circles
-from sklearn.model_selection import train_test_split
+"""Train a binary classification model on synthetic circle data."""
+
 import matplotlib.pyplot as plt
 import torch
+from sklearn.datasets import make_circles
+from sklearn.model_selection import train_test_split
 from torch import nn
-import pandas as pd
-import numpy as np
 
+RANDOM_SEED = 42
+TEST_SIZE = 0.2
+N_SAMPLES = 1000
+EPOCHS = 1000
 
-n_samples = 1000
+def create_circle_dataset(n_samples: int, test_size: float, random_state: int):
+    """Create and split the synthetic circle dataset.
 
-# Create two sircles of n_smaples dots each
-X, y = make_circles(n_samples,
-                    noise=0.03,
-                    random_state=42)
+    Args:
+        n_samples: Total number of samples to generate
+        test_size: Fraction of data to use for testing
+        random_state: Random seed for reproducibility
 
-# Make DataFrame of circle data
-circles = pd.DataFrame({"X1": X[:, 0],
-    "X2": X[:, 1],
-    "label": y
-})
+    Returns:
+        Tuple of (X_train, X_test, y_train, y_test)
+    """
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive")
+    if not (0 < test_size < 1):
+        raise ValueError("test_size must be between 0 and 1")
 
-print(circles.head(10))
+    X, y = make_circles(n_samples=n_samples, noise=0.03, random_state=random_state)
+    X = torch.from_numpy(X).float()
+    y = torch.from_numpy(y).float()
+    return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
-# Visualize with a plot
-plt.scatter(x=X[:, 0], 
-            y=X[:, 1], 
-            c=y, 
-            cmap=plt.cm.RdYlBu)
-plt.show()
+class CircleClassifier(nn.Module):
+    """A simple neural network for binary classification of circular data patterns."""
 
-y = torch.from_numpy(y).type(torch.float)
-X = torch.from_numpy(X).type(torch.float)
-
-X_train, X_test, y_train, y_test = train_test_split(X, 
-                                                    y, 
-                                                    test_size=0.2, # 20% test, 80% train
-                                                    random_state=42) # we would like our spilt be the always the same each time we lauch
-
-class CircleModelV0(nn.Module):
     def __init__(self):
         super().__init__()
-        self.layer_1 = nn.Linear(in_features=2, out_features=10)
-        self.layer_2 = nn.Linear(in_features=10, out_features=10)# takes in 2 features (X), produces 5 features
-        self.layer_3 = nn.Linear(in_features=10, out_features=1) # takes in 5 features, produces 1 feature (y)
-        self.relu = nn.ReLU()
-    def forward(self, x):
-        return self.layer_3(self.relu(self.layer_2(self.relu(self.layer_1(x)))))
-model_0 = CircleModelV0()
+        self.model = nn.Sequential(
+            nn.Linear(2, 16),
+            nn.ReLU(),
+            nn.Linear(16, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+        )
 
-# Create a loss function
-loss_fn = nn.BCEWithLogitsLoss()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x).squeeze()
 
-# Create an optimizer
-optimizer = torch.optim.SGD(params=model_0.parameters(), 
-                            lr=0.1)
+def accuracy_fn(y_true: torch.Tensor, y_pred: torch.Tensor) -> float:
+    return torch.eq(y_true, y_pred).sum().item() / len(y_true) * 100.0
 
-# Calculate accuracy (a classification metric)
-def accuracy_fn(y_true, y_pred):
-    correct = torch.eq(y_true, y_pred).sum().item()
-    acc = (correct / len(y_pred)) * 100 
-    return acc
-
-
-torch.manual_seed(42)
-
-# Set the number of epochs
-epochs = 1000
-
-# Build training and evaluation loop
-for epoch in range(epochs):
-    ### Training
-    model_0.train()
-    y_logits = model_0(X_train).squeeze()
-    y_pred = torch.round(torch.sigmoid(y_logits))
-    loss = loss_fn(y_logits,
-                   y_train) 
-    acc = accuracy_fn(y_true=y_train, 
-                      y_pred=y_pred) 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    ### Testing
-    model_0.eval()
-    with torch.inference_mode():
-        test_logits = model_0(X_test).squeeze() 
-        test_pred = torch.round(torch.sigmoid(test_logits))
-        test_loss = loss_fn(test_logits,
-                            y_test)
-        test_acc = accuracy_fn(y_true=y_test,
-                               y_pred=test_pred)
-    
-    if epoch % 100 == 0:
-        print(f"Epoch: {epoch} | Loss: {loss:.5f}, Accuracy: {acc:.2f}% | Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%")
-
-def plot_decision_boundary(model: torch.nn.Module, X: torch.Tensor, y: torch.Tensor):
-    # Setup prediction boundaries and grid
+def plot_decision_boundary(model: nn.Module, X: torch.Tensor, y: torch.Tensor) -> None:
     x_min, x_max = X[:, 0].min() - 0.1, X[:, 0].max() + 0.1
     y_min, y_max = X[:, 1].min() - 0.1, X[:, 1].max() + 0.1
-    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 101), np.linspace(y_min, y_max, 101))
-
-    # Make features
-    X_to_pred_on = torch.from_numpy(np.column_stack((xx.ravel(), yy.ravel()))).float()
-
-    # Make predictions
+    xx, yy = torch.meshgrid(
+        torch.linspace(x_min, x_max, steps=200),
+        torch.linspace(y_min, y_max, steps=200),
+        indexing="xy",
+    )
+    grid = torch.stack([xx.ravel(), yy.ravel()], dim=1)
     model.eval()
     with torch.inference_mode():
-        y_logits = model(X_to_pred_on)
-        y_pred = torch.round(torch.sigmoid(y_logits))  # binary
+        logits = model(grid)
+        predictions = torch.round(torch.sigmoid(logits)).reshape(xx.shape).numpy()
+    plt.contourf(xx.numpy(), yy.numpy(), predictions, cmap=plt.cm.RdYlBu, alpha=0.5)
+    plt.scatter(X[:, 0], X[:, 1], c=y, cmap=plt.cm.RdYlBu, edgecolor="k", s=35)
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
 
-    # Reshape preds and plot
-    y_pred = y_pred.reshape(xx.shape).detach().numpy()
-    plt.contourf(xx, yy, y_pred, cmap=plt.cm.RdYlBu, alpha=0.7)
-    plt.scatter(X[:, 0], X[:, 1], c=y, s=40, cmap=plt.cm.RdYlBu)
-    plt.xlim(xx.min(), xx.max())
-    plt.ylim(yy.min(), yy.max())
-   
-model_0.eval()
+def main() -> None:
+    """Main training and evaluation function for binary classification."""
+    torch.manual_seed(RANDOM_SEED)
 
-plt.title("train data")    
-plot_decision_boundary(model_0, X_train, y_train)
-plt.show()
+    # Validate configuration
+    if EPOCHS <= 0:
+        raise ValueError("EPOCHS must be positive")
+    if N_SAMPLES <= 0:
+        raise ValueError("N_SAMPLES must be positive")
 
-plt.title("test data") 
-plot_decision_boundary(model_0, X_test, y_test)
-plt.show()
+    X_train, X_test, y_train, y_test = create_circle_dataset(N_SAMPLES, TEST_SIZE, RANDOM_SEED)
+
+    print(f"Dataset created with {N_SAMPLES} samples")
+    print(f"Training set: {len(X_train)} samples")
+    print(f"Test set: {len(X_test)} samples")
+    print(f"Features: {X_train.shape[1]}, Classes: {len(torch.unique(y_train))}")
+
+    model = CircleClassifier()
+    loss_fn = nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    print("\nStarting training...")
+    for epoch in range(1, EPOCHS + 1):
+        model.train()
+        logits = model(X_train)
+        loss = loss_fn(logits, y_train)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if epoch % 100 == 0 or epoch == 1:
+            with torch.inference_mode():
+                train_preds = torch.round(torch.sigmoid(model(X_train)))
+                test_preds = torch.round(torch.sigmoid(model(X_test)))
+                train_acc = accuracy_fn(y_true=y_train, y_pred=train_preds)
+                test_acc = accuracy_fn(y_true=y_test, y_pred=test_preds)
+                test_loss = loss_fn(model(X_test), y_test)
+                print(
+                    f"Epoch {epoch:4d} | Train loss: {loss.item():.5f}, "
+                    f"Train acc: {train_acc:.2f}% | Test loss: {test_loss.item():.5f}, "
+                    f"Test acc: {test_acc:.2f}%"
+                )
+
+    print("\nTraining completed. Generating decision boundary plots...")
+
+    plt.figure(figsize=(6, 5))
+    plt.title("Decision Boundary on Training Data")
+    plot_decision_boundary(model, X_train, y_train)
+    plt.show()
+
+    plt.figure(figsize=(6, 5))
+    plt.title("Decision Boundary on Test Data")
+    plot_decision_boundary(model, X_test, y_test)
+    plt.show()
+
+if __name__ == "__main__":
+    main()

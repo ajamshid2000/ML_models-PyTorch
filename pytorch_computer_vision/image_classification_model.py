@@ -1,146 +1,140 @@
 
+"""Train a simple fully connected FashionMNIST model."""
+
+import time
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-import torchvision
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-import matplotlib.pyplot as plt
-from timeit import default_timer as timer
 
+RANDOM_SEED = 42
+BATCH_SIZE = 32
+EPOCHS = 3
+DATA_DIR = "./data/FashionMNIST"
 
-BATCH_SIZE = 32 # normally people choose powers of 2
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#the object train_data will have data(tensor), targets(tensor) and classes(list) stored as attributes
-train_data = datasets.FashionMNIST(root = "/home/ajamshid/sgoinfre/FashionMNIST",
-                                   train=True,
-                                   download=True,
-                                   transform=ToTensor(),
-                                   target_transform=None
-)
-test_data = datasets.FashionMNIST(root="/home/ajamshid/sgoinfre/FashionMNIST",
-                                  train=False,
-                                  download=True,
-                                  transform=ToTensor())
+def load_data(batch_size: int):
+    """Load FashionMNIST dataset with train/test split.
 
-# image, label = train_data[0]
-# print(train_data.classes[label])
-# print(f"Image shape: {image.shape}")
-# plt.imshow(image.squeeze()) # image shape is [1, 28, 28] (colour channels, height, width)
-# plt.title(label)
-# plt.show()
-
-train_dataloader = DataLoader(train_data,
-                              batch_size = BATCH_SIZE,
-                              shuffle = True)
-
-test_dataloader = DataLoader(test_data,
-                             batch_size = BATCH_SIZE,
-                             shuffle = True)
-# print(len(train_dataloader), len(test_dataloader))
-
-
-
-class FashionMNISTModelV0(nn.Module):
-    def __init__(self, input_shape: int, hidden_units: int, output_shape: int):
-        super().__init__()
-        self.layer_stack = nn.Sequential(
-            nn.Flatten(),  # keeps the first dim and reshapes the rest into a single dimention
-            nn.Linear(in_features= input_shape, out_features= hidden_units),
-            nn.Linear(in_features= hidden_units, out_features= output_shape)
-        )
-    def forward(self, x):
-        return self.layer_stack(x)
-    
-model_0 = FashionMNISTModelV0(input_shape= 784,
-                              hidden_units=10,
-                              output_shape=len(train_data.classes))
-loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(params= model_0.parameters(), lr=0.1)
-
-def print_train_time(start:float, end:float):
-    """Prints difference between start and end time.
-    
     Args:
-        start (fload): start time of the computation (in timeit formate)
-        end (float : end time of the computation)
-        
-    returns:
-        float: time beween start and end in seconds
+        batch_size: Number of samples per batch
+
+    Returns:
+        Tuple of (train_loader, test_loader)
     """
-    total_time = end - start
-    print(f"Train time : {total_time:.3f} seconds")
-    return total_time
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
 
-def accuracy_fn(y_true, y_pred):
-    correct = torch.eq(y_true, y_pred).sum().item() # torch.eq() calculates where two tensors are equal
-    acc = (correct / len(y_pred)) * 100 
-    return acc
+    transform = ToTensor()
+    train_data = datasets.FashionMNIST(
+        root=DATA_DIR,
+        train=True,
+        download=True,
+        transform=transform,
+    )
+    test_data = datasets.FashionMNIST(
+        root=DATA_DIR,
+        train=False,
+        download=True,
+        transform=transform,
+    )
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+    return train_loader, test_loader
 
-torch.manual_seed(42)
+class FashionMNISTModel(nn.Module):
+    """A fully connected neural network for FashionMNIST image classification."""
 
+    def __init__(self, input_size: int, hidden_units: int, output_size: int):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_size, hidden_units),
+            nn.ReLU(),
+            nn.Linear(hidden_units, output_size),
+        )
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.network(x)
 
+def accuracy_fn(y_true: torch.Tensor, y_pred: torch.Tensor) -> float:
+    correct = torch.eq(y_true, y_pred).sum().item()
+    return correct / len(y_true) * 100.0
 
-print("Testing preformance of the model before training")
-test_loss, test_acc = 0,0
-with torch.inference_mode():
-    for X, y in test_dataloader:
-        test_pred = model_0(X)
-        test_loss += loss_fn(test_pred, y)
-        test_acc += accuracy_fn(y, test_pred.argmax(dim = 1))
-    test_loss /= len(test_dataloader) # we go though this just to make it dynamic
-    test_acc /= len(test_dataloader)
-print(f"\nTest loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%\n")
-
-print("training the model")
-epochs = 3
-train_time_start = timer()
-for epoch in range(epochs):
-    print(f"epoch: {epoch}\n----------")
-    
-    #training
-    train_loss = 0 # this will be used to calculate avrage loss while training since we train the model in batches
-    
-    for batch, (X,y) in enumerate(train_dataloader): # batch would be the counter added by enumerate
-        model_0.train()
-        y_pred = model_0(X)
-        #calculated loss per batch
-        loss = loss_fn(y_pred, y)
-        train_loss += loss
+def train_step(
+    model: nn.Module,
+    loader: DataLoader,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> float:
+    model.train()
+    total_loss = 0.0
+    total_acc = 0.0
+    for X, y in loader:
+        X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
+        predictions = model(X)
+        loss = loss_fn(predictions, y)
         loss.backward()
         optimizer.step()
-        
-        if batch % 400 == 0:
-            print(F"looked at {batch *len(X)}/{len(train_dataloader.dataset)} samples")
-    train_loss /= len(train_dataloader)
-    
-    test_loss, test_acc = 0,0
-    model_0.eval()
+        total_loss += loss.item()
+        total_acc += accuracy_fn(y, predictions.argmax(dim=1))
+    return total_loss / len(loader), total_acc / len(loader)
+
+def test_step(
+    model: nn.Module,
+    loader: DataLoader,
+    loss_fn: nn.Module,
+) -> tuple[float, float]:
+    model.eval()
+    total_loss = 0.0
+    total_acc = 0.0
     with torch.inference_mode():
-        for X, y in test_dataloader:
-            test_pred = model_0(X)
-            test_loss += loss_fn(test_pred, y)
-            test_acc += accuracy_fn(y, test_pred.argmax(dim = 1))
-        test_loss /= len(test_dataloader)
-        test_acc /= len(test_dataloader)
-    print(f"\nTrain loss: {train_loss:.5f} | Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%\n")
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+            predictions = model(X)
+            loss = loss_fn(predictions, y)
+            total_loss += loss.item()
+            total_acc += accuracy_fn(y, predictions.argmax(dim=1))
+    return total_loss / len(loader), total_acc / len(loader)
 
-train_time_end = timer()
-total_train_time_model_0 = print_train_time(start=train_time_start,
-                                           end=train_time_end)
-print(f"end result of the model after trainng for {epochs} epochs in {total_train_time_model_0:.3f} seconds :",
-      f"model_name: {model_0.__class__.__name__}",
-      f"model_loss: {test_loss}",
-      f"model_acc: {test_acc}", sep = "\n")
+def main() -> None:
+    """Main training and evaluation function for FashionMNIST classification."""
+    torch.manual_seed(RANDOM_SEED)
 
-train_loss, train_acc = 0,0
-with torch.inference_mode():
-    for X, y in train_dataloader:
-        train_pred = model_0(X)
-        train_loss += loss_fn(train_pred, y)
-        train_acc += accuracy_fn(y, train_pred.argmax(dim = 1))
-    train_loss /= len(train_dataloader) # we go though this just to make it dynamic
-    train_acc /= len(train_dataloader)
-print(f"\nTrain loss: {train_loss:.5f}, Train acc: {train_acc:.2f}%\n")
+    # Validate configuration
+    if EPOCHS <= 0:
+        raise ValueError("EPOCHS must be positive")
+    if BATCH_SIZE <= 0:
+        raise ValueError("BATCH_SIZE must be positive")
+
+    train_loader, test_loader = load_data(BATCH_SIZE)
+    model = FashionMNISTModel(input_size=28 * 28, hidden_units=10, output_size=10).to(device)
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    print(f"Using device: {device}")
+    print(f"Model: {model.__class__.__name__}")
+    print(f"Training samples: {len(train_loader.dataset)}")
+    print(f"Test samples: {len(test_loader.dataset)}")
+    print(f"Batch size: {BATCH_SIZE}")
+    print(f"Epochs: {EPOCHS}")
+
+    start_time = time.perf_counter()
+    print("\nStarting training...")
+
+    for epoch in range(1, EPOCHS + 1):
+        train_loss, train_acc = train_step(model, train_loader, loss_fn, optimizer)
+        test_loss, test_acc = test_step(model, test_loader, loss_fn)
+        print(
+            f"Epoch {epoch}/{EPOCHS} | "
+            f"Train loss: {train_loss:.5f}, Train acc: {train_acc:.2f}% | "
+            f"Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%"
+        )
+    duration = time.perf_counter() - start_time
+    print(f"\nTraining completed in {duration:.2f} seconds")
+
+if __name__ == "__main__":
+    main()

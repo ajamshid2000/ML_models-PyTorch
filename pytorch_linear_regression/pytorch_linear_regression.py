@@ -1,153 +1,174 @@
+"""Train and evaluate a simple linear regression model using PyTorch."""
+
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
-import matplotlib.pyplot as plt
+from torch.optim.lr_scheduler import StepLR
 
-print(torch.__version__)
+RANDOM_SEED = 42
+TRAIN_RATIO = 0.8
+EPOCHS = 2500
+LEARNING_RATE = 0.01
+STEP_SIZE = 200
+LR_GAMMA = 1 / 1.2
 
-# below we will create data set for linear regression model
 
-weight = 0.7
-bias = 0.3
+def create_linear_data(weight: float, bias: float, start: float, end: float, step: float):
+    """Generate synthetic linear regression data."""
+    X = torch.arange(start, end, step, dtype=torch.float32).unsqueeze(dim=1)
+    y = weight * X + bias
+    return X, y
 
-start = 0
-end = 1
-step = 0.02 
 
-X = torch.arange(start, end, step).unsqueeze(dim=1)
-y = weight * X + bias
+def split_data(X: torch.Tensor, y: torch.Tensor, train_ratio: float):
+    """Split data into training and testing sets.
 
-train_split = int(0.8*len(X))
-X_train, y_train = X[:train_split], y[:train_split]
-X_test, y_test = X[train_split:], y[train_split:]
+    Args:
+        X: Input features tensor
+        y: Target values tensor
+        train_ratio: Fraction of data to use for training (0 < train_ratio < 1)
 
-# we make a plot function to visualize the data on a graph
-def plot_predictions(train_data = X_train,
-                     train_labels = y_train,
-                     test_data = X_test,
-                     test_label =y_test,
-                     predictions = None):
+    Returns:
+        Tuple of (X_train, y_train, X_test, y_test)
+
+    Raises:
+        ValueError: If train_ratio is not between 0 and 1
     """
-    plots training data, test data, and compares predeictions
-    """
-    plt.figure(figsize=(5,4))
-    
-    # plot training data in blue
-    plt.scatter(train_data, train_labels, c="b", s=4, label = "Training data")
-    
-    # plot test data in green 
-    plt.scatter(test_data, test_label, s= 4, c = "g", label = "Test data")
+    if not (0 < train_ratio < 1):
+        raise ValueError("train_ratio must be between 0 and 1")
+
+    split_index = int(train_ratio * len(X))
+    return X[:split_index], y[:split_index], X[split_index:], y[split_index:]
+
+
+def plot_predictions(
+    train_data: torch.Tensor,
+    train_labels: torch.Tensor,
+    test_data: torch.Tensor,
+    test_labels: torch.Tensor,
+    predictions: torch.Tensor | None = None,
+) -> None:
+    """Visualize training data, test data, and optional predictions."""
+    plt.figure(figsize=(6, 4))
+    plt.scatter(train_data, train_labels, color="tab:blue", s=20, label="Training data")
+    plt.scatter(test_data, test_labels, color="tab:green", s=20, label="Test data")
     if predictions is not None:
-        plt.scatter(test_data, predictions, c= "r", s = 4, label = "predictions")
-        
-    plt.legend(prop = {"size": 14})
+        plt.scatter(test_data, predictions, color="tab:red", s=20, label="Predictions")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("Linear regression predictions")
+    plt.legend()
     plt.show()
 
-# now we will make a custom model
+
 class LinearRegressionModel(nn.Module):
+    """A simple linear regression model with learnable weight and bias."""
+
     def __init__(self):
         super().__init__()
-        self.wights = nn.Parameter(torch.randn(1, dtype=float),
-                                   requires_grad=True)
-        self.bias = nn.Parameter(torch.randn(1,dtype=float,
-                                            requires_grad=True))
-    def forward(self, x:torch.tensor) -> torch.tensor:
-        return self.wights*x + self.bias
+        self.weight = nn.Parameter(torch.randn(1, dtype=torch.float32))
+        self.bias = nn.Parameter(torch.randn(1, dtype=torch.float32))
 
-# we can set manual seed to have the same random numbers
-# torch.manual_seed(42)
-model_0 = LinearRegressionModel()
-
-# Make predictions with model in iference mode to turn of unnessesary operations since we will not be training the model
-with torch.inference_mode():
-    y_preds = model_0(X_test)
-
-# lets see how our predictions have turned out
-plot_predictions(predictions=y_preds)
-
-# Mean absolute error (MAE) for regression problems (torch.nn.L1Loss()). Binary cross entropy for binary classification problems (torch.nn.BCELoss()).
-# Stochastic gradient descent (torch.optim.SGD()). Adam optimizer (torch.optim.Adam()).
-# Create the loss function
-loss_fn = nn.L1Loss() # MAE loss is same as L1Loss
-
-# Create the optimizer
-optimizer = torch.optim.SGD(params=model_0.parameters(), # parameters of target model to optimize
-                            lr=0.01) # learning rate (how much the optimizer should change parameters at each step, higher=more (less stable), lower=less (might take a long time))
-
-# Set the number of epochs (how many times the model will pass over the training data)
-epochs = 2500
-
-# Create empty loss lists to track values
-train_loss_values = []
-test_loss_values = []
-epoch_count = []
-learning_rate = 0.01
-
-for epoch in range(epochs):
-    ### Training
-    if(epoch%200 == 0):
-        # i would like to decrese the learning rate each 100 epocs to learn better
-        learning_rate /= 1.2
-        optimizer = torch.optim.SGD(params=model_0.parameters(),
-                            lr=learning_rate)
-        print(learning_rate)
-
-    # Put model in training mode (this is the default state of a model)
-    model_0.train()
-
-    # 1. Forward pass on train data using the forward() method inside 
-    y_pred = model_0(X_train)
-
-    # 2. Calculate the loss (how different are our models predictions to the ground truth)
-    loss = loss_fn(y_pred, y_train)
-
-    # 3. Zero grad of the optimizer
-    optimizer.zero_grad()
-
-    # 4. Loss backwards
-    loss.backward()
-
-    # 5. Progress the optimizer
-    optimizer.step()
-
-    ### Testing
-
-    # Put the model in evaluation mode
-    model_0.eval()
-
-    with torch.inference_mode():
-      # 1. Forward pass on test data
-      test_pred = model_0(X_test)
-
-      # 2. Caculate loss on test data
-      test_loss = loss_fn(test_pred, y_test.type(torch.float)) # predictions come in torch.float datatype, so comparisons need to be done with tensors of the same type
-
-      # Print out what's happening
-      if epoch % 10 == 0:
-            epoch_count.append(epoch)
-            train_loss_values.append(loss.detach().numpy())
-            test_loss_values.append(test_loss.detach().numpy())
-            print(f"Epoch: {epoch} | MAE Train Loss: {loss} | MAE Test Loss: {test_loss} ")
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.weight * x + self.bias
 
 
-# Plot the loss curves
-plt.plot(epoch_count, train_loss_values, label="Train loss")
-plt.plot(epoch_count, test_loss_values, label="Test loss")
-plt.title("Training and test loss curves")
-plt.ylabel("Loss")
-plt.xlabel("Epochs")
-plt.legend()
-plt.show()
+def train_model(
+    model: nn.Module,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: StepLR,
+    X_train: torch.Tensor,
+    y_train: torch.Tensor,
+    X_test: torch.Tensor,
+    y_test: torch.Tensor,
+    epochs: int,
+) -> tuple[list[float], list[float], list[int], torch.Tensor]:
+    train_losses = []
+    test_losses = []
+    epochs_logged = []
+    test_predictions = torch.zeros_like(y_test)
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        predictions = model(X_train)
+        loss = loss_fn(predictions, y_train)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        model.eval()
+        with torch.inference_mode():
+            test_predictions = model(X_test)
+            test_loss = loss_fn(test_predictions, y_test)
+
+        if epoch % 10 == 0 or epoch == 1:
+            train_losses.append(loss.item())
+            test_losses.append(test_loss.item())
+            epochs_logged.append(epoch)
+            print(
+                f"Epoch {epoch:4d} | Train MAE: {loss.item():.6f} | Test MAE: {test_loss.item():.6f}"
+            )
+
+    return train_losses, test_losses, epochs_logged, test_predictions
 
 
-# Find our model's learned parameters
-print("The model learned the following values for weights and bias:")
-print(model_0.state_dict())
-print("\nAnd the original values for weights and bias are:")
-print(f"weights: {weight}, bias: {bias}")
+def main() -> None:
+    """Main training and evaluation function."""
+    torch.manual_seed(RANDOM_SEED)
 
-plot_predictions(predictions=test_pred)
+    # Validate configuration
+    if EPOCHS <= 0:
+        raise ValueError("EPOCHS must be positive")
+    if LEARNING_RATE <= 0:
+        raise ValueError("LEARNING_RATE must be positive")
+
+    X, y = create_linear_data(weight=0.7, bias=0.3, start=0.0, end=1.0, step=0.02)
+    X_train, y_train, X_test, y_test = split_data(X, y, TRAIN_RATIO)
+
+    print(f"Dataset size: {len(X)} samples")
+    print(f"Training set: {len(X_train)} samples")
+    print(f"Test set: {len(X_test)} samples")
+
+    model = LinearRegressionModel()
+    loss_fn = nn.L1Loss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE)
+    scheduler = StepLR(optimizer, step_size=STEP_SIZE, gamma=LR_GAMMA)
+
+    print("\nStarting training for linear regression model...")
+    train_losses, test_losses, epochs_logged, test_predictions = train_model(
+        model=model,
+        loss_fn=loss_fn,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_test,
+        y_test=y_test,
+        epochs=EPOCHS,
+    )
+
+    print("\nLearned parameters:")
+    for name, param in model.named_parameters():
+        print(f"  {name}: {param.item():.6f}")
+
+    print("\nTarget parameters:")
+    print("  weight: 0.700000")
+    print("  bias: 0.300000")
+
+    plot_predictions(X_train, y_train, X_test, y_test, predictions=test_predictions)
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(epochs_logged, train_losses, label="Train loss")
+    plt.plot(epochs_logged, test_losses, label="Test loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("MAE")
+    plt.title("Training and Test Loss Curves")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
 
 
-
-
-
+if __name__ == "__main__":
+    main()
