@@ -1,13 +1,9 @@
 
 # PyTorch Machine Learning Models Collection
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
 A comprehensive collection of PyTorch implementations for fundamental machine learning tasks, including regression, classification, and computer vision. This repository serves as an educational resource for understanding neural network architectures and training methodologies.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ML_models-PyTorch-/
@@ -22,7 +18,7 @@ ML_models-PyTorch-/
     └── image_classification_model_with_CNN.py # Convolutional FashionMNIST classifier
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -63,7 +59,7 @@ python image_classification_model.py
 python image_classification_model_with_CNN.py
 ```
 
-## 📊 Model Descriptions
+## Model Descriptions
 
 ### Linear Regression
 - **File**: `pytorch_linear_regression/pytorch_linear_regression.py`
@@ -112,7 +108,7 @@ python image_classification_model_with_CNN.py
   - Spatial hierarchy learning
   - Improved performance over fully connected model
 
-## 🛠️ Key Features
+## Key Features
 
 - **Modular Design**: Each model is self-contained with clear separation of concerns
 - **Educational Focus**: Comprehensive comments and docstrings for learning
@@ -121,7 +117,7 @@ python image_classification_model_with_CNN.py
 - **Reproducibility**: Fixed random seeds for consistent results
 - **Best Practices**: Modern PyTorch conventions and patterns
 
-## 📈 Performance Metrics
+## Performance Metrics
 
 | Model | Dataset | Accuracy | Training Time |
 |-------|---------|----------|---------------|
@@ -134,7 +130,7 @@ python image_classification_model_with_CNN.py
 *Note: Performance may vary based on hardware and random initialization*
 
 
-## 📚 Additional Resources
+## Additional Resources
 
 - [PyTorch Official Documentation](https://pytorch.org/docs/)
 - [FashionMNIST Dataset](https://github.com/zalandoresearch/fashion-mnist)
@@ -142,4 +138,3 @@ python image_classification_model_with_CNN.py
 
 ---
 
-*Built with ❤️ using PyTorch*
